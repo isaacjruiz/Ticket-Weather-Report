@@ -41,7 +41,8 @@ class WeatherReportGenerator:
     
     def generate_terminal_report(self, results: Dict[str, WeatherData], 
                                airports: List[Airport],
-                               stats: Optional[ReportStats] = None) -> None:
+                               stats: Optional[ReportStats] = None,
+                               flight_dataset=None) -> None:
         """
         Generate and display a complete weather report in the terminal.
         
@@ -49,6 +50,7 @@ class WeatherReportGenerator:
             results: Dictionary mapping airport codes to weather data
             airports: List of airports that were processed
             stats: Optional statistics about the processing
+            flight_dataset: Optional pandas DataFrame with flight data
         """
         self.console.print("\n")
         self.console.print(Panel.fit(
@@ -59,6 +61,11 @@ class WeatherReportGenerator:
         # Generate the main weather table
         weather_table = self._format_weather_table(results, airports)
         self.console.print(weather_table)
+        
+        # Generate flight information if dataset provided
+        if flight_dataset is not None:
+            flight_summary = self._format_flight_summary(flight_dataset, results)
+            self.console.print(flight_summary)
         
         # Generate statistics if provided
         if stats:
@@ -317,135 +324,50 @@ class WeatherReportGenerator:
         self.console.print(summary)
         self.console.print("\n")
     
-    def generate_flight_level_report(self, dataset, weather_results: Dict[str, WeatherData], 
-                                   stats: Optional[ReportStats] = None) -> None:
+    def _format_flight_summary(self, flight_dataset, weather_results: Dict[str, WeatherData]) -> Panel:
         """
-        Generate and display a detailed flight-level weather report.
-        
-        This method shows weather information for each individual flight,
-        displaying origin and destination weather for all 3000 tickets.
+        Format flight summary information into a Rich panel.
         
         Args:
-            dataset: Pandas DataFrame with flight data
+            flight_dataset: Pandas DataFrame with flight data
             weather_results: Dictionary mapping airport codes to weather data
-            stats: Optional statistics about the processing
+            
+        Returns:
+            Rich Panel object with flight summary
         """
-        import pandas as pd
-        
-        self.console.print("\n")
-        self.console.print(Panel.fit(
-            "[bold blue]🛫 Informe Meteorológico Detallado por Vuelo[/bold blue]",
-            box=box.DOUBLE
-        ))
-        
-        # Create flight-level table
-        flight_table = Table(
-            title=f"Información Meteorológica para {len(dataset)} Vuelos",
-            box=box.ROUNDED,
-            show_header=True,
-            header_style="bold magenta"
-        )
-        
-        # Add columns
-        flight_table.add_column("Vuelo", style="cyan", no_wrap=True)
-        flight_table.add_column("Origen", style="white", no_wrap=True)
-        flight_table.add_column("Clima Origen", style="green")
-        flight_table.add_column("Destino", style="white", no_wrap=True)
-        flight_table.add_column("Clima Destino", style="green")
-        flight_table.add_column("Estado", style="bold", justify="center")
-        
-        # Process each flight
-        for idx, row in dataset.iterrows():
-            # Flight information
-            flight_code = f"{row['airline']}{row['flight_num']}"
-            origin_code = row['origin_iata_code']
-            dest_code = row['destination_iata_code']
-            
-            # Get weather data
-            origin_weather = weather_results.get(origin_code)
-            dest_weather = weather_results.get(dest_code)
-            
-            # Format origin weather
-            if origin_weather and origin_weather.status == WeatherStatus.SUCCESS:
-                origin_climate = f"{origin_weather.temperature:.1f}°C, {origin_weather.description.title()}"
-            else:
-                origin_climate = "[dim]No disponible[/dim]"
-            
-            # Format destination weather
-            if dest_weather and dest_weather.status == WeatherStatus.SUCCESS:
-                dest_climate = f"{dest_weather.temperature:.1f}°C, {dest_weather.description.title()}"
-            else:
-                dest_climate = "[dim]No disponible[/dim]"
-            
-            # Determine overall status
-            if (origin_weather and origin_weather.status == WeatherStatus.SUCCESS and 
-                dest_weather and dest_weather.status == WeatherStatus.SUCCESS):
-                status = "[green]✓ Completo[/green]"
-            elif (origin_weather and origin_weather.status == WeatherStatus.SUCCESS) or \
-                 (dest_weather and dest_weather.status == WeatherStatus.SUCCESS):
-                status = "[yellow]⚠ Parcial[/yellow]"
-            else:
-                status = "[red]✗ Error[/red]"
-            
-            flight_table.add_row(
-                flight_code,
-                origin_code,
-                origin_climate,
-                dest_code,
-                dest_climate,
-                status
-            )
-            
-            # Limit display to avoid overwhelming output (show first 50, then summary)
-            if idx >= 49:  # Show first 50 flights
-                remaining = len(dataset) - 50
-                if remaining > 0:
-                    flight_table.add_row(
-                        "[dim]...[/dim]",
-                        "[dim]...[/dim]",
-                        f"[dim]... y {remaining} vuelos más[/dim]",
-                        "[dim]...[/dim]",
-                        "[dim]...[/dim]",
-                        "[dim]...[/dim]"
-                    )
-                break
-        
-        self.console.print(flight_table)
-        
-        # Generate flight-level statistics
-        self._display_flight_statistics(dataset, weather_results)
-        
-        # Generate processing statistics if provided
-        if stats:
-            stats_panel = self._format_statistics_panel(stats)
-            self.console.print(stats_panel)
-        
-        self.console.print("\n")
-    
-    def _display_flight_statistics(self, dataset, weather_results: Dict[str, WeatherData]) -> None:
-        """
-        Display statistics specific to flight-level processing.
-        
-        Args:
-            dataset: Pandas DataFrame with flight data
-            weather_results: Dictionary mapping airport codes to weather data
-        """
-        total_flights = len(dataset)
+        total_flights = len(flight_dataset)
         
         # Count flights with complete weather data (both origin and destination)
         complete_flights = 0
         partial_flights = 0
         failed_flights = 0
         
-        for _, row in dataset.iterrows():
+        # Sample some flights for display
+        sample_flights = []
+        for idx, row in flight_dataset.head(10).iterrows():  # Show first 10 flights
+            flight_code = f"{row['airline']}{row['flight_num']}"
             origin_code = row['origin_iata_code']
             dest_code = row['destination_iata_code']
             
             origin_weather = weather_results.get(origin_code)
             dest_weather = weather_results.get(dest_code)
             
-            origin_success = origin_weather and origin_weather.status == WeatherStatus.SUCCESS
-            dest_success = dest_weather and dest_weather.status == WeatherStatus.SUCCESS
+            # Format weather info
+            origin_temp = f"{origin_weather.temperature:.1f}°C" if origin_weather and origin_weather.status.name == 'SUCCESS' else "N/A"
+            dest_temp = f"{dest_weather.temperature:.1f}°C" if dest_weather and dest_weather.status.name == 'SUCCESS' else "N/A"
+            
+            sample_flights.append(f"  {flight_code}: {origin_code} ({origin_temp}) → {dest_code} ({dest_temp})")
+        
+        # Count all flights by weather availability
+        for _, row in flight_dataset.iterrows():
+            origin_code = row['origin_iata_code']
+            dest_code = row['destination_iata_code']
+            
+            origin_weather = weather_results.get(origin_code)
+            dest_weather = weather_results.get(dest_code)
+            
+            origin_success = origin_weather and origin_weather.status.name == 'SUCCESS'
+            dest_success = dest_weather and dest_weather.status.name == 'SUCCESS'
             
             if origin_success and dest_success:
                 complete_flights += 1
@@ -454,43 +376,50 @@ class WeatherReportGenerator:
             else:
                 failed_flights += 1
         
-        # Create flight statistics panel
-        flight_stats_text = Text()
-        flight_stats_text.append("✈️ Estadísticas por Vuelo\n\n", style="bold blue")
+        # Create flight summary text
+        flight_text = Text()
+        flight_text.append("✈️ Resumen de Vuelos\n\n", style="bold blue")
         
-        flight_stats_text.append(f"• Total de vuelos procesados: ", style="white")
-        flight_stats_text.append(f"{total_flights:,}\n", style="bold cyan")
+        flight_text.append(f"• Total de vuelos procesados: ", style="white")
+        flight_text.append(f"{total_flights:,}\n", style="bold cyan")
         
-        flight_stats_text.append(f"• Vuelos con clima completo: ", style="white")
-        flight_stats_text.append(f"{complete_flights:,}", style="bold green")
-        flight_stats_text.append(f" ({complete_flights/total_flights*100:.1f}%)\n", style="green")
+        flight_text.append(f"• Vuelos con clima completo: ", style="white")
+        flight_text.append(f"{complete_flights:,}", style="bold green")
+        flight_text.append(f" ({complete_flights/total_flights*100:.1f}%)\n", style="green")
         
-        flight_stats_text.append(f"• Vuelos con clima parcial: ", style="white")
-        flight_stats_text.append(f"{partial_flights:,}", style="bold yellow")
-        flight_stats_text.append(f" ({partial_flights/total_flights*100:.1f}%)\n", style="yellow")
+        flight_text.append(f"• Vuelos con clima parcial: ", style="white")
+        flight_text.append(f"{partial_flights:,}", style="bold yellow")
+        flight_text.append(f" ({partial_flights/total_flights*100:.1f}%)\n", style="yellow")
         
-        flight_stats_text.append(f"• Vuelos sin clima: ", style="white")
-        flight_stats_text.append(f"{failed_flights:,}", style="bold red")
-        flight_stats_text.append(f" ({failed_flights/total_flights*100:.1f}%)\n", style="red")
+        flight_text.append(f"• Vuelos sin clima: ", style="white")
+        flight_text.append(f"{failed_flights:,}", style="bold red")
+        flight_text.append(f" ({failed_flights/total_flights*100:.1f}%)\n\n", style="red")
+        
+        # Add sample flights
+        flight_text.append("📋 Muestra de vuelos (primeros 10):\n", style="bold white")
+        for flight_info in sample_flights:
+            flight_text.append(f"{flight_info}\n", style="dim white")
+        
+        if total_flights > 10:
+            flight_text.append(f"... y {total_flights - 10:,} vuelos más\n", style="dim cyan")
         
         # Unique airports info
-        unique_origins = dataset['origin_iata_code'].nunique()
-        unique_destinations = dataset['destination_iata_code'].nunique()
-        total_unique = len(set(dataset['origin_iata_code'].unique()) | set(dataset['destination_iata_code'].unique()))
+        unique_origins = flight_dataset['origin_iata_code'].nunique()
+        unique_destinations = flight_dataset['destination_iata_code'].nunique()
+        total_unique = len(set(flight_dataset['origin_iata_code'].unique()) | set(flight_dataset['destination_iata_code'].unique()))
         
-        flight_stats_text.append(f"• Aeropuertos de origen únicos: ", style="white")
-        flight_stats_text.append(f"{unique_origins}\n", style="bold cyan")
+        flight_text.append(f"\n🏢 Aeropuertos únicos:\n", style="bold white")
+        flight_text.append(f"• Aeropuertos de origen: ", style="white")
+        flight_text.append(f"{unique_origins}\n", style="bold cyan")
         
-        flight_stats_text.append(f"• Aeropuertos de destino únicos: ", style="white")
-        flight_stats_text.append(f"{unique_destinations}\n", style="bold cyan")
+        flight_text.append(f"• Aeropuertos de destino: ", style="white")
+        flight_text.append(f"{unique_destinations}\n", style="bold cyan")
         
-        flight_stats_text.append(f"• Total aeropuertos únicos: ", style="white")
-        flight_stats_text.append(f"{total_unique}", style="bold cyan")
+        flight_text.append(f"• Total aeropuertos únicos: ", style="white")
+        flight_text.append(f"{total_unique}", style="bold cyan")
         
-        flight_panel = Panel(
-            flight_stats_text,
+        return Panel(
+            flight_text,
             box=box.ROUNDED,
             padding=(1, 2)
         )
-        
-        self.console.print(flight_panel)

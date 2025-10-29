@@ -205,13 +205,9 @@ def validate_timeout(ctx, param, value: int) -> int:
     is_flag=True,
     help='Enable verbose output with detailed progress information'
 )
-@click.option(
-    '--flight-report', 
-    is_flag=True,
-    help='Generate detailed report for each individual flight (3000 rows)'
-)
+
 @click.version_option(version='1.0.0', prog_name='Weather Report System')
-def main(dataset_file: str, api_key: str, concurrency: int, timeout: int, verbose: bool, flight_report: bool) -> None:
+def main(dataset_file: str, api_key: str, concurrency: int, timeout: int, verbose: bool) -> None:
     """
     Process flight dataset and generate weather reports.
     
@@ -250,8 +246,7 @@ def main(dataset_file: str, api_key: str, concurrency: int, timeout: int, verbos
             api_key=api_key,
             concurrency=concurrency,
             timeout=timeout,
-            verbose=verbose,
-            flight_report=flight_report
+            verbose=verbose
         ))
         
     except KeyboardInterrupt:
@@ -265,7 +260,7 @@ def main(dataset_file: str, api_key: str, concurrency: int, timeout: int, verbos
 
 
 async def process_weather_report(dataset_file: str, api_key: str, 
-                               concurrency: int, timeout: int, verbose: bool, flight_report: bool = False) -> None:
+                               concurrency: int, timeout: int, verbose: bool) -> None:
     """
     Main async function that orchestrates the weather report processing.
     
@@ -343,6 +338,9 @@ async def process_weather_report(dataset_file: str, api_key: str,
                 
                 logger.info(f"Weather processing completed. Success rate: {processing_stats.get('success_rate_percent', 0):.1f}%")
                 
+                # Get detailed cache statistics
+                cache_stats = weather_service.get_cache_stats()
+                
                 if verbose:
                     successful = processing_stats.get('airports_with_weather', 0)
                     failed = processing_stats.get('airports_without_weather', 0)
@@ -374,21 +372,13 @@ async def process_weather_report(dataset_file: str, api_key: str,
                 cache_hits=processing_stats.get('cached_requests', 0)
             )
             
-            # Display the complete terminal report
-            if flight_report:
-                # Generate detailed flight-level report
-                report_generator.generate_flight_level_report(
-                    dataset=df,
-                    weather_results=weather_results,
-                    stats=stats
-                )
-            else:
-                # Generate standard airport-level report
-                report_generator.generate_terminal_report(
-                    results=weather_results,
-                    airports=airports,
-                    stats=stats
-                )
+            # Display the weather report with flight information
+            report_generator.generate_terminal_report(
+                results=weather_results,
+                airports=airports,
+                stats=stats,
+                flight_dataset=df  # Pass the flight dataset
+            )
             
             logger.info(f"Report generation completed in {processing_time:.2f} seconds")
             

@@ -1,0 +1,112 @@
+--- table with the origin and destination airports
+SELECT t.origin, t.destination, t.marketing_airline_code as airline, t.flight_num,
+
+t.origin_iata_code, 
+t.origin_name,
+t.origin_latitude, 
+t.origin_longitude,
+
+i.iata_code as destination_iata_code,
+i.name as destination_name,
+i.latitude as destination_latitude, 
+i.longitude as destination_longitude
+
+
+from airport i join
+(SELECT  f.origin, f.destination, f.marketing_airline_code, f.flight_num, 
+a.latitude as origin_latitude, 
+a.longitude as origin_longitude,
+a.name as origin_name,
+a.iata_code as origin_iata_code
+
+from airport a join
+(SELECT coupon.origin, coupon.destination, coupon.marketing_airline_code, coupon.flight_num
+from airport
+join coupon on airport.iata_code = coupon.origin
+where airport.country ilike '%Mexico%'
+and iata_code is not null
+and flight_num is not null
+order by (coupon.marketing_airline_code, coupon.flight_num) ASC
+limit 3000) f 
+ON f.origin = a.iata_code) t 
+ON t.destination = i.iata_code;
+
+
+ 
+-- unique flights in query sum
+select sum(z.count), 'total_flights' as name
+from
+(SELECT count(*) as count, x.origin, x.destination
+from 
+(SELECT t.origin, t.destination, t.marketing_airline_code, t.flight_num,
+
+t.origin_iata_code, 
+t.origin_name,
+t.origin_latitude, 
+t.origin_longitude,
+
+i.iata_code as destination_iata_code,
+i.name as destination_name,
+i.latitude as destination_latitude, 
+i.longitude as destination_longitude
+
+
+from airport i join
+(SELECT  f.origin, f.destination, f.marketing_airline_code, f.flight_num, 
+a.latitude as origin_latitude, 
+a.longitude as origin_longitude,
+a.name as origin_name,
+a.iata_code as origin_iata_code
+
+from airport a join
+(SELECT coupon.origin, coupon.destination, coupon.marketing_airline_code, coupon.flight_num
+from airport
+join coupon on airport.iata_code = coupon.origin
+where airport.country ilike '%Mexico%'
+and iata_code is not null
+and flight_num is not null
+order by (coupon.marketing_airline_code, coupon.flight_num) ASC
+limit 3000) f 
+ON f.origin = a.iata_code) t 
+ON t.destination = i.iata_code)x
+group by (x.origin, x.destination)
+order by count DESC) z;
+
+
+ 
+-- total  flights count validation for challenge
+SELECT count(*) as count, x.origin, x.destination
+from 
+(SELECT t.origin, t.destination, t.marketing_airline_code, t.flight_num,
+
+t.origin_iata_code, 
+t.origin_name,
+t.origin_latitude, 
+t.origin_longitude,
+
+i.iata_code as destination_iata_code,
+i.name as destination_name,
+i.latitude as destination_latitude, 
+i.longitude as destination_longitude
+
+
+from airport i join
+(SELECT  f.origin, f.destination, f.marketing_airline_code, f.flight_num, 
+a.latitude as origin_latitude, 
+a.longitude as origin_longitude,
+a.name as origin_name,
+a.iata_code as origin_iata_code
+
+from airport a join
+(SELECT coupon.origin, coupon.destination, coupon.marketing_airline_code, coupon.flight_num
+from airport
+join coupon on airport.iata_code = coupon.origin
+where airport.country ilike '%Mexico%'
+and iata_code is not null
+and flight_num is not null
+order by (coupon.marketing_airline_code, coupon.flight_num) ASC
+limit 3000) f 
+ON f.origin = a.iata_code) t 
+ON t.destination = i.iata_code)x
+group by (x.origin, x.destination)
+order by count DESC;
