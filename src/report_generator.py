@@ -353,8 +353,16 @@ class WeatherReportGenerator:
             dest_weather = weather_results.get(dest_code)
             
             # Format weather info
-            origin_temp = f"{origin_weather.temperature:.1f}°C" if origin_weather and origin_weather.status.name == 'SUCCESS' else "N/A"
-            dest_temp = f"{dest_weather.temperature:.1f}°C" if dest_weather and dest_weather.status.name == 'SUCCESS' else "N/A"
+            # Consider both SUCCESS and CACHED as valid for displaying temperatures
+            valid_statuses = {WeatherStatus.SUCCESS, WeatherStatus.CACHED}
+            origin_temp = (
+                f"{origin_weather.temperature:.1f}°C"
+                if origin_weather and origin_weather.status in valid_statuses else "N/A"
+            )
+            dest_temp = (
+                f"{dest_weather.temperature:.1f}°C"
+                if dest_weather and dest_weather.status in valid_statuses else "N/A"
+            )
             
             sample_flights.append(f"  {flight_code}: {origin_code} ({origin_temp}) → {dest_code} ({dest_temp})")
         
@@ -366,8 +374,8 @@ class WeatherReportGenerator:
             origin_weather = weather_results.get(origin_code)
             dest_weather = weather_results.get(dest_code)
             
-            origin_success = origin_weather and origin_weather.status.name == 'SUCCESS'
-            dest_success = dest_weather and dest_weather.status.name == 'SUCCESS'
+            origin_success = origin_weather and (origin_weather.status in valid_statuses)
+            dest_success = dest_weather and (dest_weather.status in valid_statuses)
             
             if origin_success and dest_success:
                 complete_flights += 1

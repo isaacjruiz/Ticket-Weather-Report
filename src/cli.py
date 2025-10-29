@@ -14,9 +14,15 @@ from pathlib import Path
 from typing import Optional
 
 import click
+from dotenv import load_dotenv
 import pandas as pd
 from rich.console import Console
 from rich.logging import RichHandler
+
+# Load environment variables from .env if present during normal CLI usage.
+# Skip auto-loading during pytest to keep tests deterministic (e.g., missing API key tests).
+if 'pytest' not in sys.modules:
+    load_dotenv()
 
 # Add the src directory to Python path for imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -191,23 +197,39 @@ def validate_timeout(ctx, param, value: int) -> int:
     default=10,
     callback=validate_concurrency,
     help='Maximum number of concurrent API requests (default: 10)',
-    show_default=True
+    show_default=True,
+    envvar='WEATHER_CONCURRENCY'
 )
 @click.option(
     '--timeout', 
     default=30,
     callback=validate_timeout,
     help='Request timeout in seconds (default: 30)',
-    show_default=True
+    show_default=True,
+    envvar='WEATHER_TIMEOUT'
 )
 @click.option(
     '--verbose', 
     is_flag=True,
-    help='Enable verbose output with detailed progress information'
+    help='Enable verbose output with detailed progress information',
+    envvar='WEATHER_VERBOSE'
+)
+
+@click.option(
+    '--cache-path',
+    default=None,
+    help='Path to SQLite cache file to persist weather cache between runs',
+    envvar='WEATHER_CACHE_PATH'
+)
+@click.option(
+    '--clear-cache',
+    is_flag=True,
+    help='Clear the weather cache before processing (uses --cache-path when provided)',
+    envvar='WEATHER_CLEAR_CACHE'
 )
 
 @click.version_option(version='1.0.0', prog_name='Weather Report System')
-def main(dataset_file: str, api_key: str, concurrency: int, timeout: int, verbose: bool) -> None:
+def main(dataset_file: str, api_key: str, concurrency: int, timeout: int, verbose: bool, cache_path: Optional[str], clear_cache: bool) -> None:
     """
     Process flight dataset and generate weather reports.
     
@@ -238,15 +260,34 @@ def main(dataset_file: str, api_key: str, concurrency: int, timeout: int, verbos
         console.print(f"[dim]  • Concurrency: {concurrency}[/dim]")
         console.print(f"[dim]  • Timeout: {timeout}s[/dim]")
         console.print(f"[dim]  • API key: {'*' * (len(api_key) - 4) + api_key[-4:]}[/dim]\n")
+        if cache_path:
+            console.print(f"[dim]  • Cache path: {cache_path}[/dim]")
+        if clear_cache:
+            console.print(f"[dim]  • Clear cache: enabled[/dim]")
     
     try:
+        # Optionally clear cache before processing
+        if clear_cache:
+            try:
+                ws = WeatherService(
+                    api_key=api_key,
+                    timeout=timeout,
+                    max_concurrency=concurrency,
+                    cache_path=cache_path
+                )
+                ws.clear_cache()
+                console.print("[blue]🧹 Cache cleared[/blue]" + (f" at {cache_path}" if cache_path else " (in-memory)"))
+            except Exception as e:
+                console.print(f"[yellow]⚠️  Failed to clear cache: {str(e)}[/yellow]")
+
         # Run the async main function
         asyncio.run(process_weather_report(
             dataset_file=dataset_file,
             api_key=api_key,
             concurrency=concurrency,
             timeout=timeout,
-            verbose=verbose
+            verbose=verbose,
+            cache_path=cache_path
         ))
         
     except KeyboardInterrupt:
@@ -260,7 +301,8 @@ def main(dataset_file: str, api_key: str, concurrency: int, timeout: int, verbos
 
 
 async def process_weather_report(dataset_file: str, api_key: str, 
-                               concurrency: int, timeout: int, verbose: bool) -> None:
+                               concurrency: int, timeout: int, verbose: bool,
+                               cache_path: Optional[str] = None) -> None:
     """
     Main async function that orchestrates the weather report processing.
     
@@ -323,7 +365,8 @@ async def process_weather_report(dataset_file: str, api_key: str,
             async with WeatherService(
                 api_key=api_key, 
                 timeout=timeout, 
-                max_concurrency=concurrency
+                max_concurrency=concurrency,
+                cache_path=cache_path
             ) as weather_service:
                 
                 # Show progress for verbose mode

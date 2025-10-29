@@ -15,10 +15,10 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 try:
     from .models import WeatherData, WeatherStatus, ErrorTypes, Airport
-    from .cache_manager import WeatherCache
+    from .cache_manager import WeatherCache, SQLiteWeatherCache
 except ImportError:
     from models import WeatherData, WeatherStatus, ErrorTypes, Airport
-    from cache_manager import WeatherCache
+    from cache_manager import WeatherCache, SQLiteWeatherCache
 
 
 logger = logging.getLogger(__name__)
@@ -341,7 +341,7 @@ class WeatherService:
     fetch weather data for multiple airports while respecting API limits.
     """
     
-    def __init__(self, api_key: str, timeout: int = 30, max_concurrency: int = 10):
+    def __init__(self, api_key: str, timeout: int = 30, max_concurrency: int = 10, cache_path: Optional[str] = None):
         """
         Initialize the weather service with performance optimizations.
         
@@ -356,7 +356,15 @@ class WeatherService:
         
         # Initialize cache with optimized settings for large datasets
         cache_size = min(max_concurrency * 100, 10000)  # Scale cache with concurrency
-        self.cache = WeatherCache(max_size=cache_size)
+        # If a cache_path is provided, use SQLite-backed cache so it persists between runs
+        if cache_path:
+            try:
+                self.cache = SQLiteWeatherCache(db_path=cache_path, default_ttl=1800, max_size=cache_size)
+            except Exception:
+                # Fallback to in-memory cache on failure
+                self.cache = WeatherCache(max_size=cache_size)
+        else:
+            self.cache = WeatherCache(max_size=cache_size)
         
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._api_client: Optional[WeatherAPIClient] = None
@@ -384,9 +392,29 @@ class WeatherService:
         }
         
     async def __aenter__(self):
-        """Async context manager entry."""
-        self._api_client = WeatherAPIClient(self.api_key, self.timeout)
-        await self._api_client.__aenter__()
+        """Async context manager entry.
+
+        If a caller (usually tests) has already injected a mock `_api_client`,
+        don't override it. If the injected client provides an async __aenter__,
+        call it; otherwise skip initialization.
+        """
+        # Only create a real API client if one hasn't been injected (useful for tests)
+        if not getattr(self, '_api_client', None):
+            self._api_client = WeatherAPIClient(self.api_key, self.timeout)
+            await self._api_client.__aenter__()
+        else:
+            # If an injected client provides an async context enter, call it
+            maybe_enter = getattr(self._api_client, '__aenter__', None)
+            if maybe_enter is not None:
+                try:
+                    # If it's a coroutine function, await it
+                    result = maybe_enter()
+                    if hasattr(result, '__await__'):
+                        await result
+                except TypeError:
+                    # Not awaitable, ignore
+                    pass
+
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):

@@ -35,11 +35,6 @@ weather-report flights.csv --verbose
 
 # Con configuración personalizada
 weather-report flights.csv --concurrency 15 --timeout 45 --verbose
-```
-
-## 📁 Formato del CSV
-
-Tu archivo CSV debe tener estas columnas:
 
 ```csv
 origin_iata_code,origin_name,origin_latitude,origin_longitude,destination_iata_code,destination_name,destination_latitude,destination_longitude,airline,flight_num
@@ -65,15 +60,6 @@ LAX,Los Angeles Intl,33.9425,-118.4081,ORD,Chicago O'Hare Intl,41.9742,-87.9073,
 │ JFK         │ John F Kennedy Intl      │ 22.5°C      │ Partly Cloudy    │ 65          │ 4.2          │
 │ LAX         │ Los Angeles Intl         │ 28.1°C      │ Clear Sky        │ 45          │ 2.8          │
 └─────────────┴──────────────────────────┴─────────────┴──────────────────┴─────────────┴──────────────┘
-```
-
-### Estadísticas de Procesamiento
-```
-📊 Estadísticas de Procesamiento:
-• Total de vuelos procesados: 3000
-• Total de aeropuertos únicos: 52
-• Aeropuertos con datos meteorológicos: 50 (96.2%)
-• Consultas desde caché: 15 (28.8%)
 • Tiempo total de procesamiento: 45.2 segundos
 ```
 
@@ -84,6 +70,8 @@ LAX,Los Angeles Intl,33.9425,-118.4081,ORD,Chicago O'Hare Intl,41.9742,-87.9073,
 - `--concurrency`: Peticiones concurrentes (default: 10, máx: 50)
 - `--timeout`: Timeout en segundos (default: 30, máx: 300)
 - `--verbose`: Mostrar información detallada de progreso
+- `--cache-path`: Ruta a un archivo SQLite para persistir la caché entre ejecuciones (también via env `WEATHER_CACHE_PATH`).
+- `--clear-cache`: Limpia la caché antes de procesar (si se usa con `--cache-path`, borra el contenido del archivo SQLite; sin ruta, limpia la caché en memoria).
 - `--version`: Mostrar versión del programa
 - `--help`: Mostrar ayuda completa
 
@@ -114,11 +102,53 @@ weather-report large_flights.csv --concurrency 20 --verbose
 weather-report flights.csv --concurrency 5 --timeout 60
 ```
 
+### Caché persistente (recomendado)
+```bash
+# 1) Primera ejecución: llena la caché en .weather_cache.sqlite
+weather-report challenge_dataset.csv --api-key YOUR_API_KEY --cache-path .weather_cache.sqlite --verbose
+
+# 2) Segunda ejecución: reutiliza la caché (más rápido y sin golpear la API)
+weather-report challenge_dataset.csv --api-key YOUR_API_KEY --cache-path .weather_cache.sqlite --verbose
+
+# Limpia la caché antes de procesar
+weather-report challenge_dataset.csv --api-key YOUR_API_KEY --cache-path .weather_cache.sqlite --clear-cache --verbose
+```
+
 ### Procesamiento con archivo .env
 ```bash
 echo "OPENWEATHER_API_KEY=tu_clave_api" > .env
 weather-report flights.csv --verbose
 ```
+
+### Variables de entorno soportadas (.env)
+
+Además de `OPENWEATHER_API_KEY`, el CLI soporta estas variables para establecer valores por defecto sin pasar flags:
+
+- `WEATHER_CACHE_PATH`: Ruta a un archivo SQLite para la caché persistente.
+- `WEATHER_CONCURRENCY`: Número máximo de peticiones concurrentes (por defecto 10).
+- `WEATHER_TIMEOUT`: Timeout por petición en segundos (por defecto 30).
+- `WEATHER_VERBOSE`: Activa salida detallada si se establece a `1`, `true` o `yes`.
+- `WEATHER_CLEAR_CACHE`: Limpia la caché al inicio si se establece a `1`, `true` o `yes`.
+
+Ejemplo de `.env` completo:
+
+```
+OPENWEATHER_API_KEY=tu_clave_api
+WEATHER_CACHE_PATH=.weather_cache.sqlite
+WEATHER_CONCURRENCY=20
+WEATHER_TIMEOUT=45
+WEATHER_VERBOSE=1
+# Opcional: limpiar caché antes de cada ejecución
+# WEATHER_CLEAR_CACHE=1
+```
+
+Con este archivo `.env`, basta ejecutar:
+
+```
+weather-report challenge_dataset.csv
+```
+
+Los flags en la línea de comandos siempre tienen prioridad sobre las variables de entorno.
 
 ## 🚨 Solución de Problemas
 
@@ -178,11 +208,7 @@ python -m pytest tests/test_end_to_end.py -v
 1. **CLI Interface** (`cli.py`): Interfaz de línea de comandos
 2. **Data Processor** (`data_processor.py`): Carga y procesamiento de CSV
 3. **Weather Service** (`weather_service.py`): Orquestación de consultas meteorológicas
-4. **Cache Manager** (`cache_manager.py`): Sistema de caché con LRU
-5. **Report Generator** (`report_generator.py`): Generación de informes
-
 ### Flujo de Procesamiento
-```
 CSV → Data Processor → Weather Service → OpenWeatherMap API
                            ↓
 Cache Manager ← Weather Data ← HTTP Response

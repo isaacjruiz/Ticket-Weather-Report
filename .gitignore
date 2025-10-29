@@ -29,6 +29,11 @@ ENV/
 # Environment variables
 .env
 
+# Cache files
+*.sqlite
+*.db
+.weather_cache.sqlite
+
 # IDE
 .vscode/
 .idea/

@@ -212,3 +212,168 @@ class WeatherCache:
             'memory_usage_mb': memory_stats['estimated_mb'],
             'access_count': self._access_count
         }
+
+
+class SQLiteWeatherCache:
+    """
+    Simple SQLite-backed cache for WeatherData.
+
+    Stores serialized WeatherData objects as JSON along with a timestamp so
+    entries can be shared between separate runs of the program.
+    """
+
+    def __init__(self, db_path: str, default_ttl: int = 1800, max_size: int = 10000):
+        import sqlite3
+        import json
+        self.db_path = db_path
+        self.default_ttl = default_ttl
+        self.max_size = max_size
+        # Use a connection that can be shared across threads/tasks
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        # Enable WAL for better concurrency
+        try:
+            self._conn.execute('PRAGMA journal_mode=WAL;')
+        except Exception:
+            pass
+
+        # Create table if not exists
+        self._conn.execute(
+            'CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT, ts REAL)'
+        )
+        self._conn.commit()
+
+    def _serialize(self, data: WeatherData) -> dict:
+        return {
+            'temperature': data.temperature,
+            'description': data.description,
+            'humidity': data.humidity,
+            'wind_speed': data.wind_speed,
+            'timestamp': data.timestamp.isoformat() if data.timestamp is not None else None,
+            'status': data.status.value if data.status is not None else None,
+            'error_message': data.error_message,
+            'error_type': data.error_type.value if data.error_type is not None else None
+        }
+
+    def _deserialize(self, obj: dict) -> WeatherData:
+        from datetime import datetime
+        # Reconstruct WeatherData from the stored dict
+        ts = obj.get('timestamp')
+        timestamp = datetime.fromisoformat(ts) if ts else datetime.now()
+
+        error_type = None
+        try:
+            if obj.get('error_type'):
+                from models import ErrorTypes
+                error_type = ErrorTypes(obj.get('error_type'))
+        except Exception:
+            error_type = None
+
+        status = None
+        try:
+            if obj.get('status'):
+                from models import WeatherStatus
+                status = WeatherStatus(obj.get('status'))
+        except Exception:
+            status = None
+
+        return WeatherData(
+            temperature=float(obj.get('temperature', 0.0)),
+            description=obj.get('description', ''),
+            humidity=int(obj.get('humidity', 0)),
+            wind_speed=float(obj.get('wind_speed', 0.0)),
+            timestamp=timestamp,
+            status=status or WeatherStatus.CACHED,
+            error_message=obj.get('error_message'),
+            error_type=error_type
+        )
+
+    def get(self, key: str) -> Optional[WeatherData]:
+        import json, time
+        cur = self._conn.execute('SELECT value, ts FROM cache WHERE key = ?', (key,))
+        row = cur.fetchone()
+        if not row:
+            return None
+
+        value_json, ts = row
+        # Check TTL
+        if (time.time() - ts) > self.default_ttl:
+            # expired
+            self._conn.execute('DELETE FROM cache WHERE key = ?', (key,))
+            self._conn.commit()
+            return None
+
+        try:
+            obj = json.loads(value_json)
+            weather_data = self._deserialize(obj)
+            # Mark as cached
+            weather_data.status = WeatherStatus.CACHED
+            return weather_data
+        except Exception:
+            return None
+
+    def set(self, key: str, data: WeatherData, ttl: Optional[int] = None) -> None:
+        import json, time
+        if ttl is None:
+            ttl = self.default_ttl
+
+        value_json = json.dumps(self._serialize(data))
+        ts = time.time()
+        # Use REPLACE INTO to insert or update
+        self._conn.execute('REPLACE INTO cache (key, value, ts) VALUES (?, ?, ?)', (key, value_json, ts))
+        self._conn.commit()
+
+        # Optional eviction by max_size: if table grows too large, delete oldest
+        cur = self._conn.execute('SELECT COUNT(1) FROM cache')
+        total = cur.fetchone()[0]
+        if total > self.max_size:
+            # delete oldest entries to reduce size to max_size
+            to_remove = total - self.max_size
+            self._conn.execute(
+                'DELETE FROM cache WHERE key IN (SELECT key FROM cache ORDER BY ts ASC LIMIT ?)',
+                (to_remove,)
+            )
+            self._conn.commit()
+
+    def is_expired(self, key: str) -> bool:
+        import time
+        cur = self._conn.execute('SELECT ts FROM cache WHERE key = ?', (key,))
+        row = cur.fetchone()
+        if not row:
+            return True
+        ts = row[0]
+        return (time.time() - ts) > self.default_ttl
+
+    def clear(self) -> None:
+        self._conn.execute('DELETE FROM cache')
+        self._conn.commit()
+
+    def size(self) -> int:
+        cur = self._conn.execute('SELECT COUNT(1) FROM cache')
+        return int(cur.fetchone()[0])
+
+    def cleanup_expired(self) -> int:
+        import time
+        threshold = time.time() - self.default_ttl
+        cur = self._conn.execute('SELECT COUNT(1) FROM cache WHERE ts < ?', (threshold,))
+        removed = int(cur.fetchone()[0])
+        self._conn.execute('DELETE FROM cache WHERE ts < ?', (threshold,))
+        self._conn.commit()
+        return removed
+
+    def get_stats(self) -> Dict[str, int]:
+        cur = self._conn.execute('SELECT COUNT(1) FROM cache')
+        total = int(cur.fetchone()[0])
+        # Count expired
+        import time
+        threshold = time.time() - self.default_ttl
+        cur = self._conn.execute('SELECT COUNT(1) FROM cache WHERE ts < ?', (threshold,))
+        expired = int(cur.fetchone()[0])
+        valid = total - expired
+        return {
+            'total_entries': total,
+            'valid_entries': valid,
+            'expired_entries': expired,
+            'max_size': self.max_size,
+            'memory_usage_mb': 0.0,
+            'access_count': 0
+        }
