@@ -18,29 +18,75 @@ weather-report --version
 Obtén una clave gratuita en [OpenWeatherMap](https://openweathermap.org/api):
 
 ```bash
-# Opción 1: Variable de entorno (recomendado)
+# Opción 1: Archivo .env (recomendado)
+cp .env.example .env
+# Edita .env y añade tu API key
+
+# Opción 2: Variable de entorno
 export OPENWEATHER_API_KEY="tu_clave_api_aqui"
 
-# Opción 2: Archivo .env
-echo "OPENWEATHER_API_KEY=tu_clave_api_aqui" > .env
+# Opción 3: Pasar como parámetro
+weather-report flights.csv --api-key tu_clave_api_aqui
 ```
 
 ### 3. Usar el sistema
 ```bash
-# Comando básico
-weather-report flights.csv
+# Comando básico (lee configuración desde .env)
+weather-report challenge_dataset.csv
+
+# Con caché persistente para mejorar velocidad
+weather-report challenge_dataset.csv --cache-path .weather_cache.sqlite
 
 # Con información detallada
-weather-report flights.csv --verbose
+weather-report challenge_dataset.csv --verbose
 
-# Con configuración personalizada
-weather-report flights.csv --concurrency 15 --timeout 45 --verbose
+# Limpiar caché antes de procesar
+weather-report challenge_dataset.csv --cache-path .weather_cache.sqlite --clear-cache
+## 📁 Formato del CSV
+
+Tu archivo CSV debe tener estas columnas:
 
 ```csv
 origin_iata_code,origin_name,origin_latitude,origin_longitude,destination_iata_code,destination_name,destination_latitude,destination_longitude,airline,flight_num
 JFK,John F Kennedy Intl,40.6413,-73.7781,LAX,Los Angeles Intl,33.9425,-118.4081,AA,AA123
 LAX,Los Angeles Intl,33.9425,-118.4081,ORD,Chicago O'Hare Intl,41.9742,-87.9073,UA,UA456
 ```
+
+## ⚙️ Configuración con .env
+
+El sistema carga automáticamente la configuración desde un archivo `.env` en la raíz del proyecto:
+
+```bash
+# Copiar plantilla
+cp .env.example .env
+```
+
+**Variables de entorno soportadas:**
+
+| Variable | Descripción | Default |
+|----------|-------------|---------|
+| `OPENWEATHER_API_KEY` | API key de OpenWeatherMap (requerida) | - |
+| `WEATHER_CACHE_PATH` | Ruta al archivo SQLite para caché persistente | ninguno |
+| `WEATHER_CONCURRENCY` | Máximo de peticiones concurrentes | 10 |
+| `WEATHER_TIMEOUT` | Timeout por petición en segundos | 30 |
+| `WEATHER_VERBOSE` | Activar logs detallados (`1`, `true`, `yes`) | false |
+| `WEATHER_CLEAR_CACHE` | Limpiar caché al inicio (`1`, `true`, `yes`) | false |
+
+**Ejemplo de `.env`:**
+```bash
+OPENWEATHER_API_KEY=tu_clave_api_aqui
+WEATHER_CACHE_PATH=.weather_cache.sqlite
+WEATHER_CONCURRENCY=20
+WEATHER_TIMEOUT=45
+WEATHER_VERBOSE=1
+```
+
+Con este archivo, simplemente ejecuta:
+```bash
+weather-report challenge_dataset.csv
+```
+
+> **Nota:** Los flags de CLI tienen prioridad sobre las variables de entorno.
 
 ## 🌟 Características
 
@@ -65,15 +111,20 @@ LAX,Los Angeles Intl,33.9425,-118.4081,ORD,Chicago O'Hare Intl,41.9742,-87.9073,
 
 ## ⚙️ Parámetros del Comando
 
+**Argumentos:**
 - `CSV_FILE`: Archivo CSV con datos de vuelos (requerido)
-- `--api-key`: Clave API de OpenWeatherMap (opcional si está en variable de entorno)
-- `--concurrency`: Peticiones concurrentes (default: 10, máx: 50)
-- `--timeout`: Timeout en segundos (default: 30, máx: 300)
-- `--verbose`: Mostrar información detallada de progreso
-- `--cache-path`: Ruta a un archivo SQLite para persistir la caché entre ejecuciones (también via env `WEATHER_CACHE_PATH`).
-- `--clear-cache`: Limpia la caché antes de procesar (si se usa con `--cache-path`, borra el contenido del archivo SQLite; sin ruta, limpia la caché en memoria).
+
+**Opciones:**
+- `--api-key TEXT`: Clave API de OpenWeatherMap (también via `OPENWEATHER_API_KEY`)
+- `--concurrency INTEGER`: Peticiones concurrentes (default: 10, máx: 50, también via `WEATHER_CONCURRENCY`)
+- `--timeout INTEGER`: Timeout en segundos (default: 30, máx: 300, también via `WEATHER_TIMEOUT`)
+- `--verbose`: Mostrar información detallada (también via `WEATHER_VERBOSE=1`)
+- `--cache-path PATH`: Ruta a SQLite para caché persistente (también via `WEATHER_CACHE_PATH`)
+- `--clear-cache`: Limpia la caché antes de procesar (también via `WEATHER_CLEAR_CACHE=1`)
 - `--version`: Mostrar versión del programa
 - `--help`: Mostrar ayuda completa
+
+> **Tip:** Usa un archivo `.env` para no tener que pasar parámetros cada vez
 
 ## 🔧 Configuración Recomendada
 
@@ -86,10 +137,27 @@ LAX,Los Angeles Intl,33.9425,-118.4081,ORD,Chicago O'Hare Intl,41.9742,-87.9073,
 
 ## 💡 Ejemplos de Uso
 
-### Dataset pequeño
+### Uso básico con .env
 ```bash
-export OPENWEATHER_API_KEY="tu_clave_api"
-weather-report flights_small.csv
+# Configurar .env una vez
+cp .env.example .env
+# Editar .env con tu API key
+
+# Usar sin parámetros
+weather-report challenge_dataset.csv
+```
+
+### Con caché persistente (recomendado para datasets grandes)
+```bash
+# Primera ejecución: llena la caché
+weather-report challenge_dataset.csv --cache-path .weather_cache.sqlite
+
+# Segunda ejecución: usa caché (más rápido, sin API calls)
+weather-report challenge_dataset.csv --cache-path .weather_cache.sqlite
+# Resultado: 100% cache hit, ~0.12s vs ~1.2s
+
+# Limpiar caché y volver a procesar
+weather-report challenge_dataset.csv --cache-path .weather_cache.sqlite --clear-cache
 ```
 
 ### Dataset grande con alta velocidad
@@ -102,62 +170,29 @@ weather-report large_flights.csv --concurrency 20 --verbose
 weather-report flights.csv --concurrency 5 --timeout 60
 ```
 
-### Caché persistente (recomendado)
-```bash
-# 1) Primera ejecución: llena la caché en .weather_cache.sqlite
-weather-report challenge_dataset.csv --api-key YOUR_API_KEY --cache-path .weather_cache.sqlite --verbose
-
-# 2) Segunda ejecución: reutiliza la caché (más rápido y sin golpear la API)
-weather-report challenge_dataset.csv --api-key YOUR_API_KEY --cache-path .weather_cache.sqlite --verbose
-
-# Limpia la caché antes de procesar
-weather-report challenge_dataset.csv --api-key YOUR_API_KEY --cache-path .weather_cache.sqlite --clear-cache --verbose
-```
-
-### Procesamiento con archivo .env
-```bash
-echo "OPENWEATHER_API_KEY=tu_clave_api" > .env
-weather-report flights.csv --verbose
-```
-
-### Variables de entorno soportadas (.env)
-
-Además de `OPENWEATHER_API_KEY`, el CLI soporta estas variables para establecer valores por defecto sin pasar flags:
-
-- `WEATHER_CACHE_PATH`: Ruta a un archivo SQLite para la caché persistente.
-- `WEATHER_CONCURRENCY`: Número máximo de peticiones concurrentes (por defecto 10).
-- `WEATHER_TIMEOUT`: Timeout por petición en segundos (por defecto 30).
-- `WEATHER_VERBOSE`: Activa salida detallada si se establece a `1`, `true` o `yes`.
-- `WEATHER_CLEAR_CACHE`: Limpia la caché al inicio si se establece a `1`, `true` o `yes`.
-
-Ejemplo de `.env` completo:
-
-```
-OPENWEATHER_API_KEY=tu_clave_api
-WEATHER_CACHE_PATH=.weather_cache.sqlite
-WEATHER_CONCURRENCY=20
-WEATHER_TIMEOUT=45
-WEATHER_VERBOSE=1
-# Opcional: limpiar caché antes de cada ejecución
-# WEATHER_CLEAR_CACHE=1
-```
-
-Con este archivo `.env`, basta ejecutar:
-
-```
-weather-report challenge_dataset.csv
-```
-
-Los flags en la línea de comandos siempre tienen prioridad sobre las variables de entorno.
-
 ## 🚨 Solución de Problemas
 
 ### Errores Comunes
 
-**"Invalid API key"**
+**"Invalid API key" o "Missing option '--api-key'"**
 ```bash
-# Verificar clave API
+# Verificar que .env existe y tiene la API key
+cat .env | grep OPENWEATHER_API_KEY
+
+# O configurarla manualmente
+export OPENWEATHER_API_KEY="tu_clave_api"
+
+# Verificar que la clave funciona
 curl "https://api.openweathermap.org/data/2.5/weather?q=London&appid=TU_CLAVE_API"
+```
+
+**Limpiar caché**
+```bash
+# Opción 1: Usar el flag
+weather-report dataset.csv --cache-path .weather_cache.sqlite --clear-cache
+
+# Opción 2: Borrar el archivo
+rm .weather_cache.sqlite
 ```
 
 **"Rate limit exceeded"**
